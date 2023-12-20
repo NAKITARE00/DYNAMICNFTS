@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@thirdweb-dev/contracts": "^3.8.0",
-    "zksync-web3": "^0.14.3"
+    "zksync-web3": "^0.14.3",
+    "@chainlink/env-enc": "^1.0.5",
+    "@chainlink/functions-toolkit": "^0.2.6"
   }
 }

@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Base64.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
-import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
+import "@chainlink/contracts/src/v0.8/vrf/VRFConsumerBaseV2.sol";
 import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_0/FunctionsClient.sol";
 import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_0/libraries/FunctionsRequest.sol";
 
@@ -23,17 +23,16 @@ contract ArtistNFT is
 
     //CHAINLINKFUNCTIONS
     using FunctionsRequest for FunctionsRequest.Request;
-    string memory source;
+    string source;
     bytes32 public donId;
     bytes public s_lastResponse;
     bytes public s_lastError;
-    string source;
     uint8 donHostedSecretsSlotId;
     uint64 donHostedSecretsversion;
     bytes[] bytesArgs;
     uint64 private f_subscriptionId;
     uint32 callbackGasLimit;
-    mapping (uint256 => address) private f_requester;
+    mapping(uint256 => address) private f_requester;
 
     //VRF SETUP
     uint256[] public s_randomWords;
@@ -44,13 +43,15 @@ contract ArtistNFT is
     VRFCoordinatorV2Interface COORDINATOR;
     bytes32 s_keyHash;
     address vrfCoordinator;
-    mapping (uint256 => address) private v_vrfRequester;
-    mapping (address => uint256) private v_results;
-
+    uint256 private constant REQUEST_IN_PROGRESS = 10;
+    mapping(uint256 => address) private v_vrfRequester;
+    mapping(address => uint256) private v_results;
+    event VrfRequested(uint256 indexed requestId, address indexed sender);
+    event VrfFulfilled(uint256 indexed requestId, uint256 indexed randomness);
 
     constructor(
         address f_router,
-        string _source,
+        string memory _source,
         bytes32 _donId,
         uint8 _donHostedSecretsSlotId,
         uint64 _donHostedSecretsversion,
@@ -59,8 +60,11 @@ contract ArtistNFT is
         uint64 _v_subscriptionId,
         bytes32 _s_keyHash,
         address _vrfCoordinator
-    ) FunctionsClient(f_router), VRFConsumerBaseV2(_vrfCoordinator), 
-    ERC721("dNFT", "DNFT") {
+    )
+        FunctionsClient(f_router)
+        VRFConsumerBaseV2(_vrfCoordinator)
+        ERC721("dNFT", "DNFT")
+    {
         source = _source;
         donId = _donId;
         donHostedSecretsSlotId = _donHostedSecretsSlotId;
@@ -73,10 +77,12 @@ contract ArtistNFT is
         vrfCoordinator = _vrfCoordinator;
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
         s_owner = msg.sender;
-
+        _safeMint(s_owner, 0);
     }
 
-    function sendRequest(string memory args) public returns(uint256 requestId) {
+    function sendRequest(
+        string[] memory args
+    ) public returns (bytes32 requestId) {
         FunctionsRequest.Request memory req;
         req.setArgs(args);
         req.initializeRequestForInlineJavaScript(source);
@@ -85,10 +91,10 @@ contract ArtistNFT is
             f_subscriptionId,
             callbackGasLimit,
             donId
-        )
+        );
     }
 
-    function getRandomWords() public returns(uint256 requestId) {
+    function getRandomWords(address sender) public returns (uint256 requestId) {
         requestId = COORDINATOR.requestRandomWords(
             s_keyHash,
             v_subscriptionId,
@@ -97,8 +103,9 @@ contract ArtistNFT is
             numWords
         );
 
-        v_vrfRequester[requestId] = msg.sender;
-        v_results[]
+        v_vrfRequester[requestId] = sender;
+        v_results[sender] = REQUEST_IN_PROGRESS;
+        emit VrfRequested(requestId, sender);
     }
 
     function fulfillRequest(
@@ -113,8 +120,10 @@ contract ArtistNFT is
     function fulfillRandomWords(
         uint256 requestId,
         uint256[] memory randomWords
-    ) public override onlyVRFCoordinator {
+    ) internal override {
         s_randomWords = randomWords;
+        v_results[v_vrfRequester[requestId]] = randomWords[0];
+        emit VrfFulfilled(requestId, randomWords[0]);
     }
 
     function tokenURI(
